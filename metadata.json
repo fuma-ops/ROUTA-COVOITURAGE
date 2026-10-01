@@ -1,0 +1,6 @@
+{
+  "name": "Routa - Covoiturage National au Maroc",
+  "description": "Plateforme nationale de covoiturage au Maroc. Partagez la route, partagez les frais avec matching intelligent de trajets et calcul automatisé.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
