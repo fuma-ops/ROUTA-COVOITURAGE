@@ -56,6 +56,10 @@ export interface PassengerRequest {
   date: string;
   departureTime: string;
   seats: number;
+  // Incertitude du point (0 = point précis). Un nom de ville couvre toute
+  // l'agglomération : la tolérance de corridor est élargie d'autant.
+  pickupPrecisionMeters?: number;
+  dropoffPrecisionMeters?: number;
 }
 
 export interface ProjectionResult {
@@ -300,7 +304,10 @@ export function matchPassenger(
   );
 
   // 4. Distance au corridor (Section 9)
-  if (pickup.distanceFromRouteMeters > config.MAX_CORRIDOR_DISTANCE_METERS) {
+  const pickupMaxMeters = config.MAX_CORRIDOR_DISTANCE_METERS + (passenger.pickupPrecisionMeters || 0);
+  const dropoffMaxMeters = config.MAX_CORRIDOR_DISTANCE_METERS + (passenger.dropoffPrecisionMeters || 0);
+
+  if (pickup.distanceFromRouteMeters > pickupMaxMeters) {
     return {
       tripId: trip.id,
       passengerId: passenger.id,
@@ -314,11 +321,11 @@ export function matchPassenger(
       directionOk: pickup.routePositionKm < dropoff.routePositionKm,
       seatsAvailable: trip.totalSeats - trip.reservedSeatUnits,
       score: 0,
-      debugMessage: `Pickup is ${pickup.distanceFromRouteMeters}m away (> ${config.MAX_CORRIDOR_DISTANCE_METERS}m)`,
+      debugMessage: `Pickup is ${pickup.distanceFromRouteMeters}m away (> ${pickupMaxMeters}m)`,
     };
   }
 
-  if (dropoff.distanceFromRouteMeters > config.MAX_CORRIDOR_DISTANCE_METERS) {
+  if (dropoff.distanceFromRouteMeters > dropoffMaxMeters) {
     return {
       tripId: trip.id,
       passengerId: passenger.id,
@@ -332,7 +339,7 @@ export function matchPassenger(
       directionOk: pickup.routePositionKm < dropoff.routePositionKm,
       seatsAvailable: trip.totalSeats - trip.reservedSeatUnits,
       score: 0,
-      debugMessage: `Dropoff is ${dropoff.distanceFromRouteMeters}m away (> ${config.MAX_CORRIDOR_DISTANCE_METERS}m)`,
+      debugMessage: `Dropoff is ${dropoff.distanceFromRouteMeters}m away (> ${dropoffMaxMeters}m)`,
     };
   }
 
@@ -378,8 +385,8 @@ export function matchPassenger(
 
   // 7. COMPATIBLE : Calcul du score de classement (Section 15)
   const score = calculateCompatibilityScore(
-    pickup.distanceFromRouteMeters,
-    dropoff.distanceFromRouteMeters,
+    pickup.distanceFromRouteMeters * (config.MAX_CORRIDOR_DISTANCE_METERS / pickupMaxMeters),
+    dropoff.distanceFromRouteMeters * (config.MAX_CORRIDOR_DISTANCE_METERS / dropoffMaxMeters),
     timeDiff,
     config.MAX_CORRIDOR_DISTANCE_METERS,
     config.TIME_TOLERANCE_MINUTES

@@ -8,21 +8,7 @@ import {
   X,
   Navigation,
 } from 'lucide-react';
-
-// Curated Moroccan popular points across Marrakech & major hubs
-const MOROCCAN_PRESETS = [
-  { name: 'Targa (Carrefour), Marrakech', lat: 31.6425, lng: -8.0418 },
-  { name: 'Guéliz (Plaza), Marrakech', lat: 31.6346, lng: -8.0125 },
-  { name: 'Médina (Bab Doukkala), Marrakech', lat: 31.6295, lng: -7.9811 },
-  { name: 'Hivernage (Av. Mohammed VI), Marrakech', lat: 31.6241, lng: -8.0054 },
-  { name: 'Gare ONCF Marrakech', lat: 31.6305, lng: -8.0185 },
-  { name: 'Sidi Ghanem, Marrakech', lat: 31.6675, lng: -8.0284 },
-  { name: 'Aéroport Marrakech Ménara', lat: 31.6069, lng: -8.0363 },
-  { name: 'M’hamid, Marrakech', lat: 31.5978, lng: -8.0389 },
-  { name: 'Massira, Marrakech', lat: 31.6267, lng: -8.0583 },
-  { name: 'Casablanca (Casa Port)', lat: 33.5992, lng: -7.6114 },
-  { name: 'Rabat (Agdal)', lat: 33.9985, lng: -6.8520 },
-];
+import { MOROCCAN_PRESETS } from '../utils/places';
 
 export const LocationPickerModal: React.FC = () => {
   const {

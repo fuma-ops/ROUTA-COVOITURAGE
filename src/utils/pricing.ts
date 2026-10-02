@@ -315,22 +315,3 @@ export function calculateTripTarification(
     segment_prices: segmentPrices,
   };
 }
-
-/**
- * Calcule le prix d'un segment intermédiaire de corridor
- * @param fullPrice Prix total de la course
- * @param fullDistanceKm Distance totale du trajet
- * @param segmentDistanceKm Distance du segment sélectionné
- */
-export function calculateSegmentPrice(
-  fullPrice: number,
-  fullDistanceKm: number,
-  segmentDistanceKm: number
-): number {
-  if (fullDistanceKm <= 0 || segmentDistanceKm >= fullDistanceKm) {
-    return fullPrice;
-  }
-  const ratio = segmentDistanceKm / fullDistanceKm;
-  // Prorata kilométrique avec plancher urbain équitable de 10 DH
-  return Math.max(10, Math.round(fullPrice * ratio));
-}

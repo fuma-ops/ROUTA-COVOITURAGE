@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { MarrakechArtwork } from './MarrakechArtwork';
 import { UserAvatar } from './UserAvatar';
+import { evaluateTripMatch, formatDh } from '../utils/tripEngine';
 import {
   MapPin,
   Calendar,
@@ -428,6 +429,13 @@ export const HomeHero: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {trips.slice(0, 4).map((trip) => {
               const isExact = trip.match_type === 'exact';
+              // Contribution estimée pour le trajet complet (Pricing Engine)
+              const estimate = evaluateTripMatch(trip, {
+                origin: '',
+                destination: '',
+                date: trip.date,
+                time: trip.departure_time,
+              });
               return (
                 <div
                   key={trip.id}
@@ -501,9 +509,9 @@ export const HomeHero: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <div className="text-right">
                         <span className="text-base font-extrabold text-[#9E113E]">
-                          {trip.passenger_contribution} DH
+                          {formatDh(estimate.calculatedPrice)} DH
                         </span>
-                        <span className="block text-[10px] text-slate-400 font-medium">/ place</span>
+                        <span className="block text-[10px] text-slate-400 font-medium">estimation</span>
                       </div>
                       <span className="text-xs font-semibold text-[#9E113E] group-hover:translate-x-0.5 transition-transform">
                         →

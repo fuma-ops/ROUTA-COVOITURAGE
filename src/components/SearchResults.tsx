@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { UserAvatar } from './UserAvatar';
 import { Trip } from '../types';
-import { evaluateTripMatch, TripMatchEvaluation } from '../utils/tripMatchingService';
+import {
+  evaluateTripMatch,
+  formatDh,
+  REJECT_REASON_LABELS,
+  TripMatchEvaluation,
+} from '../utils/tripEngine';
 import {
   Search,
   SlidersHorizontal,
@@ -36,43 +41,48 @@ export const SearchResults: React.FC = () => {
   const [maxPrice, setMaxPrice] = useState(250);
   const [minSeats, setMinSeats] = useState(1);
 
-  // Évaluation dynamique et intelligente de chaque trajet selon les critères de recherche
-  const evaluatedTrips: TripMatchEvaluation[] = trips
-    .map((trip) =>
-      evaluateTripMatch(
-        trip,
-        searchParams.origin,
-        searchParams.destination,
-        searchParams.date,
-        searchParams.time
-      )
-    )
+  const isBrowsing = !searchParams.origin.trim() && !searchParams.destination.trim();
+
+  // Matching Engine (Spécification §5-15) appliqué à chaque trajet publié
+  const allEvaluations: TripMatchEvaluation[] = trips.map((trip) =>
+    evaluateTripMatch(trip, { ...searchParams, seats: isBrowsing ? 1 : minSeats })
+  );
+
+  const matchingTrips = allEvaluations.filter((evalResult) => {
+    if (!evalResult.isMatch) return false;
+    if (evalResult.calculatedPrice > maxPrice) return false;
+    const availableLeft = evalResult.trip.available_seats - evalResult.trip.reserved_seats;
+    if (!isBrowsing && availableLeft < minSeats) return false;
+    return true;
+  });
+
+  // Correspondances exactes d'abord, puis trajets compatibles, classés par score (§15)
+  const evaluatedTrips = matchingTrips
     .filter((evalResult) => {
-      // Si une recherche spécifique est saisie, on filtre par pertinence
-      if (searchParams.origin || searchParams.destination) {
-        if (!evalResult.isMatch) return false;
-      }
-      // Filtres de l'utilisateur
       if (activeTab === 'exact' && evalResult.matchType !== 'exact') return false;
       if (activeTab === 'compatible' && evalResult.matchType !== 'compatible') return false;
-      if (evalResult.calculatedPrice > maxPrice) return false;
-
-      const availableLeft = evalResult.trip.available_seats - evalResult.trip.reserved_seats;
-      if (availableLeft < minSeats) return false;
-
       return true;
     })
-    .sort((a, b) => b.score - a.score);
+    .sort(
+      (a, b) =>
+        Number(b.matchType === 'exact') - Number(a.matchType === 'exact') || b.score - a.score
+    );
 
-  const exactCount = trips.filter((t) => {
-    const res = evaluateTripMatch(t, searchParams.origin, searchParams.destination);
-    return res.matchType === 'exact';
-  }).length;
+  const exactCount = matchingTrips.filter((r) => r.matchType === 'exact').length;
+  const compatibleCount = matchingTrips.filter((r) => r.matchType === 'compatible').length;
+  const hasUnknownPlace =
+    !isBrowsing && allEvaluations.some((r) => r.rejectReason === 'UNKNOWN_PLACE');
 
-  const compatibleCount = trips.filter((t) => {
-    const res = evaluateTripMatch(t, searchParams.origin, searchParams.destination);
-    return res.matchType === 'compatible';
-  }).length;
+  // Motifs de rejet les plus fréquents, pour expliquer un résultat vide
+  const rejectSummary = Object.entries(
+    allEvaluations
+      .filter((r) => !r.isMatch && r.rejectReason && r.rejectReason !== 'TRIP_CLOSED')
+      .reduce<Record<string, number>>((acc, r) => {
+        const label = REJECT_REASON_LABELS[r.rejectReason!];
+        acc[label] = (acc[label] || 0) + 1;
+        return acc;
+      }, {})
+  );
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-12">
@@ -237,9 +247,20 @@ export const SearchResults: React.FC = () => {
             <h4 className="text-base font-bold text-slate-900 font-display">
               Aucun trajet correspondant
             </h4>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto mb-5 leading-relaxed">
+            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto mb-3 leading-relaxed">
               Aucun trajet ne correspond à vos critères actuels ({searchParams.origin || 'Départ'} → {searchParams.destination || 'Arrivée'}). Vous pouvez modifier vos critères ou proposer votre trajet si vous êtes conducteur.
             </p>
+            {hasUnknownPlace ? (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md mx-auto mb-5">
+                Lieu non reconnu : choisissez votre départ et votre destination sur la carte pour une recherche précise.
+              </p>
+            ) : (
+              rejectSummary.length > 0 && (
+                <p className="text-[11px] text-slate-400 max-w-md mx-auto mb-5">
+                  Trajets écartés : {rejectSummary.map(([label, n]) => `${label} (${n})`).join(' · ')}
+                </p>
+              )
+            )}
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={() => {
@@ -362,11 +383,11 @@ export const SearchResults: React.FC = () => {
                   {/* Pricing on right */}
                   <div className="sm:col-span-4 sm:text-right">
                     <div className="text-2xl font-extrabold text-slate-900 font-display">
-                      {calculatedPrice}{' '}
+                      {formatDh(calculatedPrice)}{' '}
                       <span className="text-sm font-bold text-[#9E113E]">DH</span>
                     </div>
                     <span className="text-[11px] text-slate-500 font-semibold block">
-                      {isSegment ? 'prix estimé segment' : 'par place / passager'}
+                      {isSegment ? 'contribution estimée · segment' : 'contribution estimée'}
                     </span>
                   </div>
                 </div>
