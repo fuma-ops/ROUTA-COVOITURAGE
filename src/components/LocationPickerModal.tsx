@@ -8,7 +8,7 @@ import {
   X,
   Navigation,
 } from 'lucide-react';
-import { MOROCCAN_PRESETS } from '../utils/places';
+import { MOROCCAN_PRESETS, displayPlaceName, labelForPoint, resolvePlace } from '../utils/places';
 
 export const LocationPickerModal: React.FC = () => {
   const {
@@ -40,10 +40,10 @@ export const LocationPickerModal: React.FC = () => {
       const initialName = val || (isOrigin ? 'Targa (Carrefour), Marrakech' : 'Médina (Bab Doukkala), Marrakech');
       setSearchQuery(val || '');
 
-      // Check if matches known preset
-      const preset = MOROCCAN_PRESETS.find((p) => p.name.toLowerCase().includes(initialName.toLowerCase()));
-      const lat = preset ? preset.lat : (isOrigin ? 31.6425 : 31.6295);
-      const lng = preset ? preset.lng : (isOrigin ? -8.0418 : -7.9811);
+      // Centre la carte sur le lieu déjà choisi (coordonnées exactes si point GPS)
+      const known = resolvePlace(initialName);
+      const lat = known ? known.lat : (isOrigin ? 31.6425 : 31.6295);
+      const lng = known ? known.lng : (isOrigin ? -8.0418 : -7.9811);
 
       setSelectedLocation({
         name: initialName,
@@ -88,7 +88,7 @@ export const LocationPickerModal: React.FC = () => {
         html: `
           <div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%, -100%);">
             <div style="background:${pinColor}; color:#fff; font-size:11px; font-weight:800; padding:4px 10px; border-radius:999px; box-shadow:0 3px 10px rgba(0,0,0,0.35); border:2px solid white; white-space:nowrap;">
-              ${pinLabel} : ${name.split(',')[0]}
+              ${pinLabel} : ${displayPlaceName(name).split(',')[0]}
             </div>
             <div style="width:16px; height:16px; background:${pinColor}; border-radius:50%; border:3px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.4); margin-top:-2px;"></div>
           </div>
@@ -109,11 +109,8 @@ export const LocationPickerModal: React.FC = () => {
       const roundedLat = Math.round(pos.lat * 10000) / 10000;
       const roundedLng = Math.round(pos.lng * 10000) / 10000;
 
-      const matched = MOROCCAN_PRESETS.find(
-        (p) => Math.abs(p.lat - pos.lat) < 0.015 && Math.abs(p.lng - pos.lng) < 0.015
-      );
-
-      const newName = matched ? matched.name : `Point GPS (${roundedLat}, ${roundedLng})`;
+      // Le point exact est conservé (aucun alignement sur le lieu connu le plus proche)
+      const newName = labelForPoint(pos.lat, pos.lng);
       setSelectedLocation({
         name: newName,
         lat: roundedLat,
@@ -128,11 +125,8 @@ export const LocationPickerModal: React.FC = () => {
       const roundedLat = Math.round(lat * 10000) / 10000;
       const roundedLng = Math.round(lng * 10000) / 10000;
 
-      const matched = MOROCCAN_PRESETS.find(
-        (p) => Math.abs(p.lat - lat) < 0.015 && Math.abs(p.lng - lng) < 0.015
-      );
-
-      const newName = matched ? matched.name : `Point GPS (${roundedLat}, ${roundedLng})`;
+      // Le point exact est conservé (aucun alignement sur le lieu connu le plus proche)
+      const newName = labelForPoint(lat, lng);
       setSelectedLocation({
         name: newName,
         lat: roundedLat,
@@ -176,8 +170,11 @@ export const LocationPickerModal: React.FC = () => {
       p.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
     );
 
+    const resolved = matched ? null : resolvePlace(searchQuery.trim());
     if (matched) {
       handleSelectPreset(matched);
+    } else if (resolved) {
+      handleSelectPreset({ name: searchQuery.trim(), lat: resolved.lat, lng: resolved.lng });
     } else {
       setSelectedLocation((prev) => ({
         ...prev,
@@ -186,8 +183,12 @@ export const LocationPickerModal: React.FC = () => {
     }
   };
 
+  const finalName = searchQuery.trim() || selectedLocation.name;
+  // Seuls les lieux localisables peuvent être confirmés : le matching en a besoin
+  const finalPlace = resolvePlace(finalName);
+
   const handleConfirm = () => {
-    const finalName = searchQuery.trim() || selectedLocation.name;
+    if (!finalPlace) return;
     confirmLocationSelection(finalName);
   };
 
@@ -285,9 +286,22 @@ export const LocationPickerModal: React.FC = () => {
                 isOrigin ? 'bg-emerald-500' : 'bg-[#9E113E]'
               }`}
             />
-            <span className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-              {searchQuery || selectedLocation.name}
-            </span>
+            <div className="min-w-0">
+              <span className="text-xs sm:text-sm font-bold text-slate-900 truncate block">
+                {displayPlaceName(finalName)}
+              </span>
+              <span
+                className={`text-[10px] font-semibold block truncate ${
+                  finalPlace ? 'text-slate-500' : 'text-rose-600'
+                }`}
+              >
+                {!finalPlace
+                  ? 'Lieu non reconnu : cliquez sur la carte pour placer le repère'
+                  : finalPlace.precisionMeters === 0
+                    ? `Point exact · ${finalPlace.lat.toFixed(4)}, ${finalPlace.lng.toFixed(4)}`
+                    : `Ville entière (±${Math.round(finalPlace.precisionMeters / 1000)} km) · précisez sur la carte`}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -299,7 +313,8 @@ export const LocationPickerModal: React.FC = () => {
             </button>
             <button
               onClick={handleConfirm}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-sm transition-all ${
+              disabled={!finalPlace}
+              className={`disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-sm transition-all ${
                 isOrigin ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#9E113E] hover:bg-[#850D33]'
               }`}
             >

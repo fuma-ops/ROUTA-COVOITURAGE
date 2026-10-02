@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
+import { displayPlaceName } from '../utils/places';
 import { UserAvatar } from './UserAvatar';
 import {
   CheckCircle2,
@@ -87,12 +88,12 @@ export const BookingConfirmationModal: React.FC = () => {
             <div className="flex items-center gap-2 text-slate-800">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               <span className="font-semibold">Prise en charge :</span>
-              <span>{lastBooking.pickup_point}</span>
+              <span>{displayPlaceName(lastBooking.pickup_point)}</span>
             </div>
             <div className="flex items-center gap-2 text-slate-800">
               <span className="w-2 h-2 rounded-full bg-[#9E113E]"></span>
               <span className="font-semibold">Dépose :</span>
-              <span>{lastBooking.dropoff_point}</span>
+              <span>{displayPlaceName(lastBooking.dropoff_point)}</span>
             </div>
           </div>
 

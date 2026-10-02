@@ -8,6 +8,7 @@ import {
   REJECT_REASON_LABELS,
   TripMatchEvaluation,
 } from '../utils/tripEngine';
+import { displayPlaceName, isPrecisePlace } from '../utils/places';
 import {
   Search,
   SlidersHorizontal,
@@ -42,6 +43,9 @@ export const SearchResults: React.FC = () => {
   const [minSeats, setMinSeats] = useState(1);
 
   const isBrowsing = !searchParams.origin.trim() && !searchParams.destination.trim();
+  // Point exact du passager s'il en a choisi un, sinon l'arrêt du conducteur le plus proche
+  const shownPoint = (label: string, nearestStop: string) =>
+    label.trim() && isPrecisePlace(label) ? displayPlaceName(label) : nearestStop;
 
   // Matching Engine (Spécification §5-15) appliqué à chaque trajet publié
   const allEvaluations: TripMatchEvaluation[] = trips.map((trip) =>
@@ -91,14 +95,14 @@ export const SearchResults: React.FC = () => {
         <div className="flex-1 w-full flex flex-wrap items-center gap-2 px-2 text-xs sm:text-sm text-slate-800">
           <div className="flex items-center gap-1.5 font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>{searchParams.origin || 'Partout au Maroc'}</span>
+            <span>{searchParams.origin ? displayPlaceName(searchParams.origin) : 'Partout au Maroc'}</span>
           </div>
 
           <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
           <div className="flex items-center gap-1.5 font-semibold">
             <span className="w-2 h-2 rounded-full bg-[#9E113E]"></span>
-            <span>{searchParams.destination || 'Toutes destinations'}</span>
+            <span>{searchParams.destination ? displayPlaceName(searchParams.destination) : 'Toutes destinations'}</span>
           </div>
 
           <span className="text-slate-300 hidden sm:inline">|</span>
@@ -375,7 +379,10 @@ export const SearchResults: React.FC = () => {
                     {/* Segment details if passenger matches an intermediate corridor stop */}
                     {isSegment && (
                       <div className="text-[11px] text-sky-800 bg-sky-50/80 px-2.5 py-1 rounded-lg border border-sky-100 flex items-center gap-1.5 w-fit">
-                        <span>Prise en charge : <strong>{pickupPoint}</strong> → Dépose : <strong>{dropoffPoint}</strong></span>
+                        <span>
+                          Prise en charge : <strong>{shownPoint(searchParams.origin, pickupPoint)}</strong> → Dépose :{' '}
+                          <strong>{shownPoint(searchParams.destination, dropoffPoint)}</strong>
+                        </span>
                       </div>
                     )}
                   </div>

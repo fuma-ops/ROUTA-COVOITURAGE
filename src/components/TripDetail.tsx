@@ -26,6 +26,7 @@ import {
   quoteBooking,
   REJECT_REASON_LABELS,
 } from '../utils/tripEngine';
+import { displayPlaceName, isPrecisePlace } from '../utils/places';
 
 export const TripDetail: React.FC = () => {
   const {
@@ -51,10 +52,28 @@ export const TripDetail: React.FC = () => {
     selectedTrip && (searchParams.origin.trim() || searchParams.destination.trim())
       ? evaluateTripMatch(selectedTrip, searchParams)
       : null;
+  // Points exacts du passager (GPS choisi sur la carte ou lieu précis) : il réserve
+  // avec ses propres points, projetés sur la route du conducteur (Spécification §7-8)
+  const corridorNames = corridorList.map((c) => c.name);
+  const ownPoint = (label: string) =>
+    searchMatch?.isMatch && label.trim() && isPrecisePlace(label) && !corridorNames.includes(label.trim())
+      ? label.trim()
+      : null;
+  const ownPickup = ownPoint(searchParams.origin);
+  const ownDropoff = ownPoint(searchParams.destination);
+
   const defaultOriginName =
-    (searchMatch?.isMatch && searchMatch.pickupPoint) || selectedTrip?.origin.split(',')[0] || '';
+    ownPickup ||
+    (searchMatch?.isMatch && searchMatch.pickupPoint) ||
+    corridorList[0]?.name ||
+    selectedTrip?.origin.split(',')[0] ||
+    '';
   const defaultDestName =
-    (searchMatch?.isMatch && searchMatch.dropoffPoint) || selectedTrip?.destination.split(',')[0] || '';
+    ownDropoff ||
+    (searchMatch?.isMatch && searchMatch.dropoffPoint) ||
+    corridorList[corridorList.length - 1]?.name ||
+    selectedTrip?.destination.split(',')[0] ||
+    '';
 
   const [pickupStop, setPickupStop] = useState<string>(defaultOriginName);
   const [dropoffStop, setDropoffStop] = useState<string>(defaultDestName);
@@ -304,7 +323,7 @@ export const TripDetail: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold text-slate-900">{p.name}</p>
                       <p className="text-[11px] text-slate-500">
-                        {p.pickup_point} → {p.dropoff_point}
+                        {displayPlaceName(p.pickup_point)} → {displayPlaceName(p.dropoff_point)}
                       </p>
                     </div>
                   </div>
@@ -335,7 +354,7 @@ export const TripDetail: React.FC = () => {
         {/* Booking Card & Block Remaining Seats */}
         <div className="bg-gradient-to-br from-white to-rose-50/40 rounded-3xl p-5 sm:p-6 border border-rose-200/80 shadow-md space-y-5">
           {/* Corridor Segment Selector */}
-          {corridorList.length > 2 && (
+          {(corridorList.length > 2 || ownPickup || ownDropoff) && (
             <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
@@ -359,6 +378,9 @@ export const TripDetail: React.FC = () => {
                     onChange={(e) => setPickupStop(e.target.value)}
                     className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5"
                   >
+                    {ownPickup && (
+                      <option value={ownPickup}>📍 {displayPlaceName(ownPickup)} (votre point)</option>
+                    )}
                     {corridorList.slice(0, -1).map((c) => (
                       <option key={c.id} value={c.name}>
                         {c.name} ({c.approx_time})
@@ -376,6 +398,9 @@ export const TripDetail: React.FC = () => {
                     onChange={(e) => setDropoffStop(e.target.value)}
                     className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5"
                   >
+                    {ownDropoff && (
+                      <option value={ownDropoff}>📍 {displayPlaceName(ownDropoff)} (votre point)</option>
+                    )}
                     {corridorList.slice(1).map((c) => (
                       <option key={c.id} value={c.name}>
                         {c.name} ({c.approx_time})
@@ -462,7 +487,7 @@ export const TripDetail: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between pt-1">
-              <span>Votre contribution ({seatsToReserve} place{seatsToReserve > 1 ? 's' : ''}, {pickupStop} → {dropoffStop}) :</span>
+              <span>Votre contribution ({seatsToReserve} place{seatsToReserve > 1 ? 's' : ''}, {displayPlaceName(pickupStop)} → {displayPlaceName(dropoffStop)}) :</span>
               <span className="font-semibold text-slate-900">{formatDh(totalPriceToPay)} DH</span>
             </div>
             <div className="flex items-center justify-between">

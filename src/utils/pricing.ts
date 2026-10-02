@@ -159,12 +159,30 @@ export function calculateCoordsDistanceKm(
 /**
  * Estime la distance, la durée et le péage entre deux adresses ou repères
  */
+// Coordonnées d'un lieu ; precisionMeters > 0 pour une ville entière
+export interface GeoCoords {
+  lat: number;
+  lng: number;
+  precisionMeters?: number;
+}
+
 export function estimateDistanceAndDuration(
   origin: string,
   destination: string,
-  originCoords?: { lat: number; lng: number },
-  destCoords?: { lat: number; lng: number }
+  originCoords?: GeoCoords,
+  destCoords?: GeoCoords
 ): { km: number; min: number; toll: number } {
+  const hasCoords = !!(originCoords && destCoords && originCoords.lat && destCoords.lat);
+  const fromCoords = () =>
+    calculateCoordsDistanceKm(originCoords!.lat, originCoords!.lng, destCoords!.lat, destCoords!.lng);
+
+  // Deux points précis (GPS choisi sur la carte, lieu connu) : la distance vient des coordonnées
+  if (hasCoords && !originCoords!.precisionMeters && !destCoords!.precisionMeters) {
+    return fromCoords();
+  }
+
+  // Ville entière : son centre n'est pas un vrai point, les distances de référence
+  // par la route sont plus justes
   const normOrigin = normalizePlace(origin);
   const normDest = normalizePlace(destination);
 
@@ -174,16 +192,6 @@ export function estimateDistanceAndDuration(
   }
   if (DISTANCE_MATRIX[normDest]?.[normOrigin]) {
     return DISTANCE_MATRIX[normDest][normOrigin];
-  }
-
-  // Si coordonnées GPS disponibles, calcul précis
-  if (originCoords && destCoords && originCoords.lat && destCoords.lat) {
-    return calculateCoordsDistanceKm(
-      originCoords.lat,
-      originCoords.lng,
-      destCoords.lat,
-      destCoords.lng
-    );
   }
 
   // Détection interurbaine par nom de ville
@@ -201,6 +209,10 @@ export function estimateDistanceAndDuration(
     if (DISTANCE_MATRIX[foundDestCity]?.[foundOriginCity]) {
       return DISTANCE_MATRIX[foundDestCity][foundOriginCity];
     }
+  }
+
+  if (hasCoords) {
+    return fromCoords();
   }
 
   // Par défaut intra-urbain (trajet moyen de ville marocaine : 10 km, 20 min)
@@ -229,8 +241,8 @@ export function calculateTripTarification(
   destination: string,
   availableSeats: number = 3,
   customPricePerSeat?: number,
-  originCoords?: { lat: number; lng: number },
-  destCoords?: { lat: number; lng: number }
+  originCoords?: GeoCoords,
+  destCoords?: GeoCoords
 ): TarificationBreakdown {
   const { km, min, toll } = estimateDistanceAndDuration(origin, destination, originCoords, destCoords);
 

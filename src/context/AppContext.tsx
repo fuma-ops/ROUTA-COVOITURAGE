@@ -25,7 +25,7 @@ import {
 import { calculateTripTarification } from '../utils/pricing';
 import { quoteBooking, repriceTrip } from '../utils/tripEngine';
 import { MATCHING_CONFIG } from '../utils/matchingEngine';
-import { resolvePlace } from '../utils/places';
+import { displayPlaceName, resolvePlace } from '../utils/places';
 
 export type NavigationPage =
   | 'home'
@@ -678,8 +678,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const defaultVehicle =
       (currentUser.vehicle_id && vehiclesList[currentUser.vehicle_id]) ||
       MOCK_VEHICLES.veh_yassine;
-    const origin = tripData.origin || 'Targa, Marrakech';
-    const destination = tripData.destination || 'Médina, Marrakech';
+    const originLabel = tripData.origin || 'Targa, Marrakech';
+    const destinationLabel = tripData.destination || 'Médina, Marrakech';
+    // Coordonnées GPS des lieux choisis (exactes pour un point posé sur la carte)
+    const originPlace = resolvePlace(originLabel);
+    const destinationPlace = resolvePlace(destinationLabel);
+    if (!originPlace || !destinationPlace) {
+      throw new Error('Lieu non reconnu : choisissez le départ et la destination sur la carte.');
+    }
+    // Les coordonnées sont stockées à part : le libellé affiché reste lisible
+    const origin = displayPlaceName(originLabel);
+    const destination = displayPlaceName(destinationLabel);
+    const originStopName = origin.split(',')[0];
+    const destinationStopName =
+      destination.split(',')[0] === originStopName ? `${destination.split(',')[0]} (arrivée)` : destination.split(',')[0];
     const seats = tripData.available_seats || 4;
 
     // Automatic compliant Moroccan carpooling tarification (Section 26)
@@ -687,14 +699,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       origin,
       destination,
       seats,
-      tripData.passenger_contribution
+      tripData.passenger_contribution,
+      originPlace,
+      destinationPlace
     );
 
     const seatContribution = tripData.passenger_contribution || tarif.suggested_price_per_seat;
-
-    // Coordonnées réelles du départ et de l'arrivée : base de la géométrie du trajet (Spécification §3)
-    const originPlace = resolvePlace(origin) || { lat: 31.6425, lng: -8.0418 };
-    const destinationPlace = resolvePlace(destination) || { lat: 31.6295, lng: -7.9811 };
 
     const newTrip: Trip = {
       id: `trip_${Date.now()}`,
@@ -708,8 +718,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       destination_lat: destinationPlace.lat,
       destination_lng: destinationPlace.lng,
       corridor: tripData.corridor || [
-        { id: '1', name: origin.split(',')[0], approx_time: tripData.departure_time || '08:00', lat: originPlace.lat, lng: originPlace.lng, type: 'origin' },
-        { id: '2', name: destination.split(',')[0], approx_time: addMinutes(tripData.departure_time || '08:00', tarif.duration_min), lat: destinationPlace.lat, lng: destinationPlace.lng, type: 'destination' },
+        { id: '1', name: originStopName, approx_time: tripData.departure_time || '08:00', lat: originPlace.lat, lng: originPlace.lng, type: 'origin' },
+        { id: '2', name: destinationStopName, approx_time: addMinutes(tripData.departure_time || '08:00', tarif.duration_min), lat: destinationPlace.lat, lng: destinationPlace.lng, type: 'destination' },
       ],
       date: tripData.date || "Aujourd'hui",
       departure_time: tripData.departure_time || '08:00',

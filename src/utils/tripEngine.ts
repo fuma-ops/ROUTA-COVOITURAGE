@@ -345,14 +345,18 @@ export function evaluateTripMatch(trip: Trip, search: TripSearch): TripMatchEval
   const canonical = tripToCanonical(trip);
   const seats = Math.max(1, search.seats || 1);
   const browsing = !search.origin.trim() && !search.destination.trim();
+  // Départ et arrivée du conducteur = premier et dernier arrêt (coordonnées exactes)
+  const routePointsOfTrip = getTripRoutePoints(trip);
+  const tripStart = routePointsOfTrip[0].name;
+  const tripEnd = routePointsOfTrip[routePointsOfTrip.length - 1].name;
 
   // Sans départ ni destination : on affiche le trajet entier, sans filtre horaire
   const quote = browsing
-    ? quoteBooking(trip, trip.origin, trip.destination, seats)
+    ? quoteBooking(trip, tripStart, tripEnd, seats)
     : quoteBooking(
         trip,
-        search.origin.trim() || trip.origin,
-        search.destination.trim() || trip.destination,
+        search.origin.trim() || tripStart,
+        search.destination.trim() || tripEnd,
         seats,
         { date: search.date, time: search.time, toleranceMinutes: search.toleranceMinutes }
       );

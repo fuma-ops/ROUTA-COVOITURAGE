@@ -75,11 +75,77 @@ function primaryKey(name: string): string {
   return normalizePlaceName(name.split(/[,(]/)[0]);
 }
 
-/** "Point GPS (31.6425, -8.0418)" → coordonnées (sélection libre sur la carte) */
+/* ------------------------------------------------------------------ */
+/* Libellés porteurs de coordonnées                                     */
+/* Un point choisi sur la carte garde ses coordonnées exactes dans son  */
+/* libellé : elles suivent le lieu dans la recherche, la réservation,   */
+/* la publication et le stockage, sans perte ni approximation.          */
+/* ------------------------------------------------------------------ */
+
+const GPS_LABEL_REGEX = /GPS\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?/i;
+
+// En deçà de cette distance, un point cliqué porte le nom du lieu connu
+// (ses coordonnées restent celles du clic)
+const SAME_PLACE_METERS = 100;
+// Rayon dans lequel on indique « Près de … » pour rendre le libellé lisible
+const NEARBY_LABEL_METERS = 2000;
+
+function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/** "… GPS 31.6425, -8.0418" ou "Point GPS (31.6425, -8.0418)" → coordonnées exactes */
 function parseGpsLabel(name: string): Place | null {
-  const m = name.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
-  if (!m || !/gps/i.test(name)) return null;
+  const m = name.match(GPS_LABEL_REGEX);
+  if (!m) return null;
   return { name, lat: parseFloat(m[1]), lng: parseFloat(m[2]), precisionMeters: 0 };
+}
+
+/**
+ * Libellé d'un point cliqué sur la carte. Il embarque toujours les coordonnées
+ * exactes du clic ; le nom du lieu connu voisin ne sert qu'à la lisibilité.
+ */
+export function labelForPoint(lat: number, lng: number): string {
+  const roundedLat = Math.round(lat * 10000) / 10000;
+  const roundedLng = Math.round(lng * 10000) / 10000;
+  let nearest: NamedPoint | null = null;
+  let nearestMeters = Infinity;
+  for (const p of MOROCCAN_PRESETS) {
+    const d = distanceMeters(p, { lat, lng });
+    if (d < nearestMeters) {
+      nearest = p;
+      nearestMeters = d;
+    }
+  }
+  const prefix = !nearest
+    ? 'Point sur la carte'
+    : nearestMeters <= SAME_PLACE_METERS
+      ? nearest.name.split(',')[0]
+      : nearestMeters <= NEARBY_LABEL_METERS
+        ? `Près de ${nearest.name.split(',')[0]}`
+        : 'Point sur la carte';
+  return `${prefix} · GPS ${roundedLat}, ${roundedLng}`;
+}
+
+/** Libellé lisible, sans les coordonnées : "Près de Guéliz (Plaza)" */
+export function displayPlaceName(label: string): string {
+  const cleaned = label
+    .replace(/\s*·\s*GPS.*$/i, '')
+    .replace(GPS_LABEL_REGEX, '')
+    .trim();
+  return cleaned || 'Point sur la carte';
+}
+
+/** Vrai si le libellé désigne un point précis (pas une ville entière) */
+export function isPrecisePlace(label: string): boolean {
+  const place = resolvePlace(label);
+  return !!place && place.precisionMeters === 0;
 }
 
 /**

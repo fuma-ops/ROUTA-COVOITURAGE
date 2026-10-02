@@ -17,6 +17,7 @@ import {
   Coins,
 } from 'lucide-react';
 import { calculateTripTarification } from '../utils/pricing';
+import { displayPlaceName, resolvePlace } from '../utils/places';
 
 export const PublishTripModal: React.FC = () => {
   const {
@@ -40,8 +41,19 @@ export const PublishTripModal: React.FC = () => {
   const [customSeatPrice, setCustomSeatPrice] = useState<number | null>(null);
   const [published, setPublished] = useState(false);
 
+  // Coordonnées GPS des lieux choisis : base de la géométrie et de la distance du trajet
+  const originPlace = resolvePlace(origin);
+  const destinationPlace = resolvePlace(destination);
+
   // Automatic distance & fair cost sharing calculation (Section 26)
-  const tarif = calculateTripTarification(origin, destination, places);
+  const tarif = calculateTripTarification(
+    origin,
+    destination,
+    places,
+    undefined,
+    originPlace || undefined,
+    destinationPlace || undefined
+  );
   const effectiveSeatPrice = customSeatPrice !== null ? customSeatPrice : tarif.suggested_price_per_seat;
 
   // Strict check: Passengers and disconnected visitors cannot publish trips!
@@ -219,9 +231,11 @@ export const PublishTripModal: React.FC = () => {
                   </div>
                 </div>
 
+                <PlaceStatus label={origin} place={originPlace} />
+
                 <div className="pt-4 flex justify-end">
                   <button
-                    disabled={!origin.trim()}
+                    disabled={!originPlace}
                     onClick={() => setStep(2)}
                     className="px-6 py-3 bg-[#9E113E] hover:bg-[#850D33] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-sm transition-all"
                   >
@@ -286,6 +300,8 @@ export const PublishTripModal: React.FC = () => {
                   </span>
                 </div>
 
+                <PlaceStatus label={destination} place={destinationPlace} />
+
                 <div className="pt-4 flex justify-between">
                   <button
                     onClick={() => setStep(1)}
@@ -294,8 +310,9 @@ export const PublishTripModal: React.FC = () => {
                     Retour
                   </button>
                   <button
+                    disabled={!destinationPlace}
                     onClick={() => setStep(3)}
-                    className="px-6 py-3 bg-[#9E113E] hover:bg-[#850D33] text-white rounded-xl font-bold text-sm shadow-sm transition-all"
+                    className="disabled:opacity-50 disabled:cursor-not-allowed px-6 py-3 bg-[#9E113E] hover:bg-[#850D33] text-white rounded-xl font-bold text-sm shadow-sm transition-all"
                   >
                     Continuer
                   </button>
@@ -547,5 +564,27 @@ export const PublishTripModal: React.FC = () => {
         )}
       </div>
     </div>
+  );
+};
+
+// Indique si le lieu saisi est localisé (point exact, ville entière) ou inconnu
+const PlaceStatus: React.FC<{ label: string; place: ReturnType<typeof resolvePlace> }> = ({
+  label,
+  place,
+}) => {
+  if (!label.trim()) return null;
+  if (!place) {
+    return (
+      <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+        Lieu non reconnu : utilisez le bouton « Carte » pour placer le point exact.
+      </p>
+    );
+  }
+  return (
+    <p className="text-[11px] text-slate-500">
+      {place.precisionMeters === 0
+        ? `📍 ${displayPlaceName(label)} · point exact ${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`
+        : `📍 ${displayPlaceName(label)} · ville entière : précisez le point sur la carte pour un trajet plus précis`}
+    </p>
   );
 };
