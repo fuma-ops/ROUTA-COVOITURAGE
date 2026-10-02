@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { UserAvatar } from './UserAvatar';
 import { Trip } from '../types';
-import { evaluateTripMatch, TripMatchEvaluation } from '../utils/tripMatchingService';
+import {
+  evaluateTripMatch,
+  formatDh,
+  REJECT_REASON_LABELS,
+  TripMatchEvaluation,
+} from '../utils/tripEngine';
+import { displayPlaceName, isPrecisePlace } from '../utils/places';
 import {
   Search,
   SlidersHorizontal,
@@ -36,43 +42,51 @@ export const SearchResults: React.FC = () => {
   const [maxPrice, setMaxPrice] = useState(250);
   const [minSeats, setMinSeats] = useState(1);
 
-  // Évaluation dynamique et intelligente de chaque trajet selon les critères de recherche
-  const evaluatedTrips: TripMatchEvaluation[] = trips
-    .map((trip) =>
-      evaluateTripMatch(
-        trip,
-        searchParams.origin,
-        searchParams.destination,
-        searchParams.date,
-        searchParams.time
-      )
-    )
+  const isBrowsing = !searchParams.origin.trim() && !searchParams.destination.trim();
+  // Point exact du passager s'il en a choisi un, sinon l'arrêt du conducteur le plus proche
+  const shownPoint = (label: string, nearestStop: string) =>
+    label.trim() && isPrecisePlace(label) ? displayPlaceName(label) : nearestStop;
+
+  // Matching Engine (Spécification §5-15) appliqué à chaque trajet publié
+  const allEvaluations: TripMatchEvaluation[] = trips.map((trip) =>
+    evaluateTripMatch(trip, { ...searchParams, seats: isBrowsing ? 1 : minSeats })
+  );
+
+  const matchingTrips = allEvaluations.filter((evalResult) => {
+    if (!evalResult.isMatch) return false;
+    if (evalResult.calculatedPrice > maxPrice) return false;
+    const availableLeft = evalResult.trip.available_seats - evalResult.trip.reserved_seats;
+    if (!isBrowsing && availableLeft < minSeats) return false;
+    return true;
+  });
+
+  // Correspondances exactes d'abord, puis trajets compatibles, classés par score (§15)
+  const evaluatedTrips = matchingTrips
     .filter((evalResult) => {
-      // Si une recherche spécifique est saisie, on filtre par pertinence
-      if (searchParams.origin || searchParams.destination) {
-        if (!evalResult.isMatch) return false;
-      }
-      // Filtres de l'utilisateur
       if (activeTab === 'exact' && evalResult.matchType !== 'exact') return false;
       if (activeTab === 'compatible' && evalResult.matchType !== 'compatible') return false;
-      if (evalResult.calculatedPrice > maxPrice) return false;
-
-      const availableLeft = evalResult.trip.available_seats - evalResult.trip.reserved_seats;
-      if (availableLeft < minSeats) return false;
-
       return true;
     })
-    .sort((a, b) => b.score - a.score);
+    .sort(
+      (a, b) =>
+        Number(b.matchType === 'exact') - Number(a.matchType === 'exact') || b.score - a.score
+    );
 
-  const exactCount = trips.filter((t) => {
-    const res = evaluateTripMatch(t, searchParams.origin, searchParams.destination);
-    return res.matchType === 'exact';
-  }).length;
+  const exactCount = matchingTrips.filter((r) => r.matchType === 'exact').length;
+  const compatibleCount = matchingTrips.filter((r) => r.matchType === 'compatible').length;
+  const hasUnknownPlace =
+    !isBrowsing && allEvaluations.some((r) => r.rejectReason === 'UNKNOWN_PLACE');
 
-  const compatibleCount = trips.filter((t) => {
-    const res = evaluateTripMatch(t, searchParams.origin, searchParams.destination);
-    return res.matchType === 'compatible';
-  }).length;
+  // Motifs de rejet les plus fréquents, pour expliquer un résultat vide
+  const rejectSummary = Object.entries(
+    allEvaluations
+      .filter((r) => !r.isMatch && r.rejectReason && r.rejectReason !== 'TRIP_CLOSED')
+      .reduce<Record<string, number>>((acc, r) => {
+        const label = REJECT_REASON_LABELS[r.rejectReason!];
+        acc[label] = (acc[label] || 0) + 1;
+        return acc;
+      }, {})
+  );
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-12">
@@ -81,14 +95,14 @@ export const SearchResults: React.FC = () => {
         <div className="flex-1 w-full flex flex-wrap items-center gap-2 px-2 text-xs sm:text-sm text-slate-800">
           <div className="flex items-center gap-1.5 font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>{searchParams.origin || 'Partout au Maroc'}</span>
+            <span>{searchParams.origin ? displayPlaceName(searchParams.origin) : 'Partout au Maroc'}</span>
           </div>
 
           <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
           <div className="flex items-center gap-1.5 font-semibold">
             <span className="w-2 h-2 rounded-full bg-[#9E113E]"></span>
-            <span>{searchParams.destination || 'Toutes destinations'}</span>
+            <span>{searchParams.destination ? displayPlaceName(searchParams.destination) : 'Toutes destinations'}</span>
           </div>
 
           <span className="text-slate-300 hidden sm:inline">|</span>
@@ -237,9 +251,20 @@ export const SearchResults: React.FC = () => {
             <h4 className="text-base font-bold text-slate-900 font-display">
               Aucun trajet correspondant
             </h4>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto mb-5 leading-relaxed">
+            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto mb-3 leading-relaxed">
               Aucun trajet ne correspond à vos critères actuels ({searchParams.origin || 'Départ'} → {searchParams.destination || 'Arrivée'}). Vous pouvez modifier vos critères ou proposer votre trajet si vous êtes conducteur.
             </p>
+            {hasUnknownPlace ? (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md mx-auto mb-5">
+                Lieu non reconnu : choisissez votre départ et votre destination sur la carte pour une recherche précise.
+              </p>
+            ) : (
+              rejectSummary.length > 0 && (
+                <p className="text-[11px] text-slate-400 max-w-md mx-auto mb-5">
+                  Trajets écartés : {rejectSummary.map(([label, n]) => `${label} (${n})`).join(' · ')}
+                </p>
+              )
+            )}
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={() => {
@@ -354,7 +379,10 @@ export const SearchResults: React.FC = () => {
                     {/* Segment details if passenger matches an intermediate corridor stop */}
                     {isSegment && (
                       <div className="text-[11px] text-sky-800 bg-sky-50/80 px-2.5 py-1 rounded-lg border border-sky-100 flex items-center gap-1.5 w-fit">
-                        <span>Prise en charge : <strong>{pickupPoint}</strong> → Dépose : <strong>{dropoffPoint}</strong></span>
+                        <span>
+                          Prise en charge : <strong>{shownPoint(searchParams.origin, pickupPoint)}</strong> → Dépose :{' '}
+                          <strong>{shownPoint(searchParams.destination, dropoffPoint)}</strong>
+                        </span>
                       </div>
                     )}
                   </div>
@@ -362,11 +390,11 @@ export const SearchResults: React.FC = () => {
                   {/* Pricing on right */}
                   <div className="sm:col-span-4 sm:text-right">
                     <div className="text-2xl font-extrabold text-slate-900 font-display">
-                      {calculatedPrice}{' '}
+                      {formatDh(calculatedPrice)}{' '}
                       <span className="text-sm font-bold text-[#9E113E]">DH</span>
                     </div>
                     <span className="text-[11px] text-slate-500 font-semibold block">
-                      {isSegment ? 'prix estimé segment' : 'par place / passager'}
+                      {isSegment ? 'contribution estimée · segment' : 'contribution estimée'}
                     </span>
                   </div>
                 </div>

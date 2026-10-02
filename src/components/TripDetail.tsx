@@ -20,7 +20,13 @@ import {
   Calculator,
   ChevronDown,
 } from 'lucide-react';
-import { calculateSegmentPrice } from '../utils/pricing';
+import {
+  evaluateTripMatch,
+  formatDh,
+  quoteBooking,
+  REJECT_REASON_LABELS,
+} from '../utils/tripEngine';
+import { displayPlaceName, isPrecisePlace } from '../utils/places';
 
 export const TripDetail: React.FC = () => {
   const {
@@ -33,6 +39,7 @@ export const TripDetail: React.FC = () => {
     setActiveConversationId,
     setShowTarificationModal,
     setShowAuthModal,
+    searchParams,
   } = useApp();
 
   const [seatsToReserve, setSeatsToReserve] = useState(1);
@@ -40,8 +47,33 @@ export const TripDetail: React.FC = () => {
 
   // Corridor list and default stops
   const corridorList = selectedTrip?.corridor || [];
-  const defaultOriginName = selectedTrip?.origin.split(',')[0] || '';
-  const defaultDestName = selectedTrip?.destination.split(',')[0] || '';
+  // Arrêts proposés par défaut : ceux trouvés par le matching pour la recherche en cours
+  const searchMatch =
+    selectedTrip && (searchParams.origin.trim() || searchParams.destination.trim())
+      ? evaluateTripMatch(selectedTrip, searchParams)
+      : null;
+  // Points exacts du passager (GPS choisi sur la carte ou lieu précis) : il réserve
+  // avec ses propres points, projetés sur la route du conducteur (Spécification §7-8)
+  const corridorNames = corridorList.map((c) => c.name);
+  const ownPoint = (label: string) =>
+    searchMatch?.isMatch && label.trim() && isPrecisePlace(label) && !corridorNames.includes(label.trim())
+      ? label.trim()
+      : null;
+  const ownPickup = ownPoint(searchParams.origin);
+  const ownDropoff = ownPoint(searchParams.destination);
+
+  const defaultOriginName =
+    ownPickup ||
+    (searchMatch?.isMatch && searchMatch.pickupPoint) ||
+    corridorList[0]?.name ||
+    selectedTrip?.origin.split(',')[0] ||
+    '';
+  const defaultDestName =
+    ownDropoff ||
+    (searchMatch?.isMatch && searchMatch.dropoffPoint) ||
+    corridorList[corridorList.length - 1]?.name ||
+    selectedTrip?.destination.split(',')[0] ||
+    '';
 
   const [pickupStop, setPickupStop] = useState<string>(defaultOriginName);
   const [dropoffStop, setDropoffStop] = useState<string>(defaultDestName);
@@ -64,28 +96,21 @@ export const TripDetail: React.FC = () => {
   const remainingSeats = selectedTrip.available_seats - selectedTrip.reserved_seats;
   const isFull = remainingSeats <= 0;
 
-  // Segment calculation based on Section 26 (Cahier des charges)
-  const pickupIndex = corridorList.findIndex((c) =>
-    c.name.toLowerCase().includes(pickupStop.toLowerCase())
-  );
-  const dropoffIndex = corridorList.findIndex((c) =>
-    c.name.toLowerCase().includes(dropoffStop.toLowerCase())
-  );
+  // Matching + Segment + Pricing Engines (Spécification §13-28) sur le tronçon choisi
+  const quote = quoteBooking(selectedTrip, pickupStop, dropoffStop, Math.min(seatsToReserve, Math.max(1, remainingSeats)));
+  const blockQuote =
+    remainingSeats > 1 ? quoteBooking(selectedTrip, pickupStop, dropoffStop, remainingSeats) : null;
 
-  const safePickupIdx = pickupIndex !== -1 ? pickupIndex : 0;
-  const safeDropoffIdx = dropoffIndex !== -1 ? dropoffIndex : Math.max(0, corridorList.length - 1);
-
-  const isFullRoute = safePickupIdx === 0 && safeDropoffIdx >= corridorList.length - 1;
-  const segmentRatio =
-    corridorList.length > 1
-      ? Math.max(0.35, Math.abs(safeDropoffIdx - safePickupIdx) / Math.max(1, corridorList.length - 1))
-      : 1;
-
-  const unitPricePerSeat = selectedTrip.passenger_contribution;
-  const effectiveUnitPrice = isFullRoute
-    ? unitPricePerSeat
-    : Math.max(10, Math.round(unitPricePerSeat * segmentRatio));
-  const totalPriceToPay = effectiveUnitPrice * seatsToReserve;
+  const isFullRoute =
+    corridorList.length < 2 ||
+    (pickupStop === corridorList[0].name && dropoffStop === corridorList[corridorList.length - 1].name);
+  const totalPriceToPay = quote.price;
+  // Le prix ne dépend que des proportions ; l'affichage reprend la distance routière du trajet
+  const segmentKm =
+    quote.routeDistanceKm > 0
+      ? Math.round(((quote.dropoffKm - quote.pickupKm) / quote.routeDistanceKm) * selectedTrip.distance_km * 10) / 10
+      : 0;
+  const canBook = !isFull && quote.compatible;
 
   const handleShare = () => {
     navigator.clipboard?.writeText(window.location.href);
@@ -230,10 +255,10 @@ export const TripDetail: React.FC = () => {
 
             <div className="text-left sm:text-right">
               <div className="text-2xl font-extrabold text-[#9E113E] font-display">
-                {selectedTrip.passenger_contribution} DH
+                {formatDh(selectedTrip.global_price)} DH
               </div>
-              <span className="text-[11px] text-slate-500 font-semibold block">par passager / place</span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">Partage équitable ({selectedTrip.global_price} DH au total)</span>
+              <span className="text-[11px] text-slate-500 font-semibold block">prix global du trajet</span>
+              <span className="text-[10px] text-slate-400 block mt-0.5">Partagé entre les passagers selon la distance</span>
             </div>
           </div>
 
@@ -298,12 +323,12 @@ export const TripDetail: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold text-slate-900">{p.name}</p>
                       <p className="text-[11px] text-slate-500">
-                        {p.pickup_point} → {p.dropoff_point}
+                        {displayPlaceName(p.pickup_point)} → {displayPlaceName(p.dropoff_point)}
                       </p>
                     </div>
                   </div>
                   <span className="text-xs font-bold text-slate-700">
-                    {p.contribution_dh} DH
+                    {formatDh(p.contribution_dh)} DH
                   </span>
                 </div>
               ))}
@@ -329,7 +354,7 @@ export const TripDetail: React.FC = () => {
         {/* Booking Card & Block Remaining Seats */}
         <div className="bg-gradient-to-br from-white to-rose-50/40 rounded-3xl p-5 sm:p-6 border border-rose-200/80 shadow-md space-y-5">
           {/* Corridor Segment Selector */}
-          {corridorList.length > 2 && (
+          {(corridorList.length > 2 || ownPickup || ownDropoff) && (
             <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
@@ -353,6 +378,9 @@ export const TripDetail: React.FC = () => {
                     onChange={(e) => setPickupStop(e.target.value)}
                     className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5"
                   >
+                    {ownPickup && (
+                      <option value={ownPickup}>📍 {displayPlaceName(ownPickup)} (votre point)</option>
+                    )}
                     {corridorList.slice(0, -1).map((c) => (
                       <option key={c.id} value={c.name}>
                         {c.name} ({c.approx_time})
@@ -370,6 +398,9 @@ export const TripDetail: React.FC = () => {
                     onChange={(e) => setDropoffStop(e.target.value)}
                     className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5"
                   >
+                    {ownDropoff && (
+                      <option value={ownDropoff}>📍 {displayPlaceName(ownDropoff)} (votre point)</option>
+                    )}
                     {corridorList.slice(1).map((c) => (
                       <option key={c.id} value={c.name}>
                         {c.name} ({c.approx_time})
@@ -388,15 +419,23 @@ export const TripDetail: React.FC = () => {
               </span>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-3xl font-extrabold text-slate-900 font-display">
-                  {totalPriceToPay} <span className="text-lg font-bold text-[#9E113E]">DH</span>
+                  {quote.compatible ? formatDh(totalPriceToPay) : '—'} <span className="text-lg font-bold text-[#9E113E]">DH</span>
                 </span>
                 <span className="text-xs text-slate-500">
-                  pour {seatsToReserve} place{seatsToReserve > 1 ? 's' : ''} ({effectiveUnitPrice} DH/place {!isFullRoute && '· segment'})
+                  pour {seatsToReserve} place{seatsToReserve > 1 ? 's' : ''}
+                  {quote.compatible && !isFullRoute && ` · segment de ${segmentKm} km`}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Calcul automatisé proportionnel à la distance selon le barème officiel Routa.
+                Le prix global est réparti par segment, selon la distance parcourue et le nombre de passagers présents.
+                Il peut baisser si d'autres passagers rejoignent le trajet.
               </p>
+              {!quote.compatible && quote.reason && !isFull && (
+                <p className="text-xs font-semibold text-rose-700 mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Réservation impossible : {REJECT_REASON_LABELS[quote.reason]}</span>
+                </p>
+              )}
             </div>
 
             {/* Places Selector */}
@@ -448,8 +487,8 @@ export const TripDetail: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between pt-1">
-              <span>Contribution passager ({seatsToReserve} place{seatsToReserve > 1 ? 's' : ''} × {effectiveUnitPrice} DH) :</span>
-              <span className="font-semibold text-slate-900">{totalPriceToPay} DH</span>
+              <span>Votre contribution ({seatsToReserve} place{seatsToReserve > 1 ? 's' : ''}, {displayPlaceName(pickupStop)} → {displayPlaceName(dropoffStop)}) :</span>
+              <span className="font-semibold text-slate-900">{formatDh(totalPriceToPay)} DH</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Frais de service Routa (Section 33 - 100% gratuit) :</span>
@@ -457,7 +496,7 @@ export const TripDetail: React.FC = () => {
             </div>
             <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 font-bold text-slate-900">
               <span>Total à verser au conducteur :</span>
-              <span className="text-base text-[#9E113E]">{totalPriceToPay} DH</span>
+              <span className="text-base text-[#9E113E]">{formatDh(totalPriceToPay)} DH</span>
             </div>
 
             <button
@@ -473,21 +512,21 @@ export const TripDetail: React.FC = () => {
           {/* Action buttons */}
           <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
             <button
-              disabled={isFull}
+              disabled={!canBook}
               onClick={handleBooking}
               className="w-full sm:flex-1 py-3.5 bg-[#9E113E] hover:bg-[#850D33] active:scale-98 disabled:opacity-50 text-white rounded-xl font-bold text-sm shadow-md shadow-[#9E113E]/20 transition-all flex items-center justify-center gap-2"
             >
-              <span>Réserver {seatsToReserve} place{seatsToReserve > 1 ? 's' : ''} ({totalPriceToPay} DH)</span>
+              <span>Réserver {seatsToReserve} place{seatsToReserve > 1 ? 's' : ''} ({formatDh(totalPriceToPay)} DH)</span>
             </button>
 
-            {remainingSeats > 1 && (
+            {remainingSeats > 1 && blockQuote?.compatible && (
               <button
                 onClick={handleBlockRemaining}
                 className="w-full sm:w-auto px-4 py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
                 title="Bloquer toutes les places pour voyager seul ou avec vos proches"
               >
                 <Lock className="w-3.5 h-3.5 text-slate-600" />
-                <span>Bloquer les {remainingSeats} places ({remainingSeats * effectiveUnitPrice} DH)</span>
+                <span>Bloquer les {remainingSeats} places ({formatDh(blockQuote.price)} DH)</span>
               </button>
             )}
           </div>
